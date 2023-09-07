@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.net.MalformedURLException;
 import java.net.URL;
 
+@SuppressWarnings("deprecation")
 public class URLUtils {
 	public static Tuple<String, String> getVideoId(String url) throws MalformedURLException, UnsupportedOperationException, IllegalArgumentException {
 		if (isPlaylist(url)) return new Tuple<>(null, url);
