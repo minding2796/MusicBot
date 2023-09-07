@@ -4,15 +4,15 @@ import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.OnlineStatus;
+import net.dv8tion.jda.api.Permission;
 import net.dv8tion.jda.api.entities.Activity;
 import net.dv8tion.jda.api.entities.Guild;
-import net.dv8tion.jda.api.interactions.commands.OptionType;
-import net.dv8tion.jda.api.interactions.commands.build.OptionData;
+import net.dv8tion.jda.api.entities.Member;
+import net.dv8tion.jda.api.entities.Message;
 import net.dv8tion.jda.api.requests.GatewayIntent;
-import net.dv8tion.jda.api.requests.restaction.CommandListUpdateAction;
 import net.dv8tion.jda.api.utils.MemberCachePolicy;
-import net.dv8tion.jda.internal.interactions.CommandDataImpl;
 import org.discord.utils.FileUtils;
+import org.discord.utils.Tuple;
 
 import java.io.File;
 import java.io.IOException;
@@ -22,11 +22,10 @@ import java.util.List;
 import java.util.Scanner;
 
 public class MusicBot {
-	public static JDA jda;
-	public static String commandPrefix = "!";
-	public static HashMap<Guild, List<AudioTrack>> queue = new HashMap<>();
-	public static List<Guild> repeat = new ArrayList<>();
-	
+	public static JDA jda;	static String commandPrefix = "!";
+	static HashMap<Guild, List<Tuple<AudioTrack, Message>>> queue = new HashMap<>();
+	static HashMap<Guild, Integer> volume = new HashMap<>();
+	static List<Guild> repeat = new ArrayList<>();
 	public static void main(String[] args) {
 		try {
 			JDABuilder builder = JDABuilder.createDefault(FileUtils.readFile(new File("BOTTOKEN.token")));
@@ -47,10 +46,13 @@ public class MusicBot {
 				if (!file.exists()) file.createNewFile();
 			} catch (IOException ignored) {
 			}
-			e.printStackTrace();
+			e.printStackTrace(System.out);
 			System.err.print("봇토큰을 찾을 수 없습니다\nBOTTOKEN.token을 확인해 주세요\n(엔터시 종료)");
 			new Scanner(System.in).nextLine();
 			System.exit(0);
 		}
+	}
+	public static boolean permissionCheck(Member m, Permission... permission) {
+		return m.hasPermission(permission);
 	}
 }
