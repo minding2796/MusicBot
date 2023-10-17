@@ -4,10 +4,8 @@ import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.OnlineStatus;
-import net.dv8tion.jda.api.Permission;
 import net.dv8tion.jda.api.entities.Activity;
 import net.dv8tion.jda.api.entities.Guild;
-import net.dv8tion.jda.api.entities.Member;
 import net.dv8tion.jda.api.entities.Message;
 import net.dv8tion.jda.api.requests.GatewayIntent;
 import net.dv8tion.jda.api.utils.MemberCachePolicy;
@@ -22,10 +20,12 @@ import java.util.List;
 import java.util.Scanner;
 
 public class MusicBot {
-	public static JDA jda;	static String commandPrefix = "!";
+	public static JDA jda;
+	static String commandPrefix = "!";
 	static HashMap<Guild, List<Tuple<AudioTrack, Message>>> queue = new HashMap<>();
 	static HashMap<Guild, Integer> volume = new HashMap<>();
 	static List<Guild> repeat = new ArrayList<>();
+	static List<Guild> repeatSingle = new ArrayList<>();
 	public static void main(String[] args) {
 		try {
 			JDABuilder builder = JDABuilder.createDefault(FileUtils.readFile(new File("BOTTOKEN.token")));
@@ -51,8 +51,5 @@ public class MusicBot {
 			new Scanner(System.in).nextLine();
 			System.exit(0);
 		}
-	}
-	public static boolean permissionCheck(Member m, Permission... permission) {
-		return m.hasPermission(permission);
 	}
 }
