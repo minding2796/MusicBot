@@ -1,10 +1,8 @@
 package org.discord;
 
+import com.sedmelluq.discord.lavaplayer.player.AudioLoadResultHandler;
 import com.sedmelluq.discord.lavaplayer.player.AudioPlayer;
-import com.sedmelluq.discord.lavaplayer.player.DefaultAudioPlayerManager;
 import com.sedmelluq.discord.lavaplayer.player.event.TrackEndEvent;
-import com.sedmelluq.discord.lavaplayer.player.event.TrackExceptionEvent;
-import com.sedmelluq.discord.lavaplayer.source.soundcloud.SoundCloudAudioSourceManager;
 import com.sedmelluq.discord.lavaplayer.tools.FriendlyException;
 import com.sedmelluq.discord.lavaplayer.track.*;
 import net.dv8tion.jda.api.EmbedBuilder;
@@ -23,13 +21,10 @@ import org.discord.utils.korean.KoreanUtils;
 import org.jetbrains.annotations.NotNull;
 
 import java.awt.*;
-import java.net.MalformedURLException;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static java.lang.Math.min;
 import static org.discord.MusicBot.*;
@@ -68,99 +63,44 @@ public class DiscordListener implements EventListener {
 	}
 	
 	
-	public void playExecute(Message message, User u, MessageReceivedEvent e, @NotNull Message originalmessage, boolean isSoundcloud) {
+	public void playExecute(Message message, User u, MessageReceivedEvent e, @NotNull Message originalmessage) {
+		String identifier = null;
+		if (message.getContentRaw().equals(commandPrefix + "p") || message.getContentRaw().equals(commandPrefix + "play")) {
+			if (!message.getAttachments().isEmpty()) identifier = message.getAttachments().get(0).getUrl();
+			else identifier = message.getReferencedMessage().getContentRaw();
+		}
 		if (e.getMember().getVoiceState().inAudioChannel()) {
 			int len = 0;
 			if (message.getContentRaw().startsWith(commandPrefix + "p ")) len = commandPrefix.length() + 2;
 			if (message.getContentRaw().startsWith(commandPrefix + "play ")) len = commandPrefix.length() + 5;
-			if (message.getContentRaw().startsWith(commandPrefix + "sp ")) len = commandPrefix.length() + 3;
-			if (message.getContentRaw().startsWith(commandPrefix + "soundcloudplay ")) len = commandPrefix.length() + 15;
-			AudioTrack item;
-			Iterator<AudioTrack> iterator = null;
-			boolean allowlist = false;
-			if (isSoundcloud) {
-				String url = message.getContentRaw().substring(len);
-				message.addReaction(Emoji.fromUnicode("✅")).queue();
-				var playerManager = new DefaultAudioPlayerManager();
-				AudioSources.registerSources(playerManager);
-				item = SoundCloudAudioSourceManager.createDefault().loadFromTrackPage(url);
-			} else {
-				Tuple<String, String> videoid;
-					try {
-						videoid = URLUtils.getVideoId(message.getContentRaw().substring(len));
-					} catch (MalformedURLException | UnsupportedOperationException | IllegalArgumentException exception) {
-						videoid = new Tuple<>(message.getContentRaw().substring(len), null);
-					}
-				originalmessage.addReaction(Emoji.fromUnicode("✅")).queue();
-				String listid = videoid.b() != null ? videoid.b() : null;
-				var youtubeAudioSourceManager = new YTSourceManager(true);
-				youtubeAudioSourceManager.setPlaylistPageCount(100);
-				AudioItem audioItem;
-				if (listid != null) {
-					audioItem = youtubeAudioSourceManager.playlist(listid, videoid.a());
-					allowlist = true;
-				} else {
-					if (URLUtils.isVideoId(videoid.a())) {
-						audioItem = youtubeAudioSourceManager.loadTrackWithVideoId(videoid.a(), true);
-					} else {
-						audioItem = youtubeAudioSourceManager.search(videoid.a());
-					}
-				}
-				if (audioItem instanceof AudioTrack t) {
-					item = t;
-				} else if (audioItem instanceof AudioPlaylist p) {
-					if (allowlist) {
-						item = null;
-						var list = p.getTracks();
-						iterator = list.iterator();
-					} else {
-						item = p.getTracks().get(0);
-					}
-				} else {
-					item = null;
-				}
+			AtomicBoolean isFirst = new AtomicBoolean(false);
+			if (message.getContentRaw().startsWith(commandPrefix + "pf ")) {
+				isFirst.set(true);
+				len = commandPrefix.length() + 3;
 			}
-			if (allowlist && iterator != null) {
-				while (iterator.hasNext()) {
-					item = iterator.next();
+			if (message.getContentRaw().startsWith(commandPrefix + "playfirst ")) {
+				isFirst.set(true);
+				len = commandPrefix.length() + 10;
+			}
+			PlayerManager.getInstance().loadItemOrdered(e.getGuild(), identifier != null ? identifier : message.getContentRaw().substring(len), new AudioLoadResultHandler() {
+				@Override
+				public void trackLoaded(AudioTrack item) {
+					originalmessage.addReaction(Emoji.fromUnicode("✅")).queue();
 					if (queue.getOrDefault(e.getGuild(), new ArrayList<>()).isEmpty()) {
-						var playerManager = new DefaultAudioPlayerManager();
+						var playerManager = PlayerManager.getInstance();
 						AudioSources.registerSources(playerManager);
 						var player = playerManager.createPlayer();
-						player.addListener(evt -> {
-							if (evt instanceof TrackExceptionEvent evnt) {
-								AtomicReference<AudioTrack> track = new AtomicReference<>(null);
-								new Thread(() -> {
-									while (track.get() == null) {
-										try {
-											var youtubeAudioSourceManager = new YTSourceManager(true);
-											youtubeAudioSourceManager.setPlaylistPageCount(100);
-											track.set((AudioTrack) youtubeAudioSourceManager.loadTrackWithVideoId(evnt.track.getInfo().uri, true));
-										} catch (FriendlyException ignored) {
-										}
-									}
-									evnt.player.playTrack(track.get());
-									Thread.interrupted();
-								}).start();
-								return;
-							}
+						player.addListener((evt) -> {
 							if (evt instanceof TrackEndEvent evnt) {
 								Guild guild = e.getGuild();
-								var list = queue.get(guild);
+								var list = queue.getOrDefault(guild, new ArrayList<>());
+								if (!list.get(0).a().equals(evnt.track)) return;
 								if (evnt.endReason.equals(AudioTrackEndReason.LOAD_FAILED)) {
-									AtomicReference<AudioTrack> track = new AtomicReference<>(null);
-									new Thread(() -> {
-										while (track.get() == null) {
-											try {
-												var youtubeAudioSourceManager = new YTSourceManager(true);
-												youtubeAudioSourceManager.setPlaylistPageCount(100);
-												track.set((AudioTrack) youtubeAudioSourceManager.loadTrackWithVideoId(evnt.track.getInfo().uri, true));
-											} catch (FriendlyException ignored) {
-											}
-										}
-										evnt.player.playTrack(track.get());
-										Thread.interrupted();
-									}).start();
+									PlayerManager.getInstance().loadItemOrdered(e.getGuild(), evnt.track.getIdentifier(), new ErrorResultHandler(evnt, originalmessage));
+									return;
+								}
+								if (repeatSingle.contains(guild)) {
+									PlayerManager.getInstance().loadItemOrdered(e.getGuild(), evnt.track.getInfo().uri, new ErrorResultHandler(evnt, originalmessage));
 									return;
 								}
 								if (repeat.contains(guild)) {
@@ -193,94 +133,154 @@ public class DiscordListener implements EventListener {
 						audioManager.openAudioConnection(voiceChannel);
 					} else {
 						var list = queue.get(e.getGuild());
-						list.add(new Tuple<>(item, originalmessage));
+						if (isFirst.get()) {
+							list.add(1, new Tuple<>(item, originalmessage));
+						} else {
+							list.add(new Tuple<>(item, originalmessage));
+						}
 						queue.remove(e.getGuild());
 						queue.put(e.getGuild(), list);
 					}
 				}
-			} else {
-				if (queue.getOrDefault(e.getGuild(), new ArrayList<>()).isEmpty()) {
-					var playerManager = new DefaultAudioPlayerManager();
-					AudioSources.registerSources(playerManager);
-					var player = playerManager.createPlayer();
-					player.addListener((evt) -> {
-						if (evt instanceof TrackExceptionEvent evnt) {
-							AtomicReference<AudioTrack> track = new AtomicReference<>(null);
-							new Thread(() -> {
-								while (track.get() == null) {
-									try {
-										var youtubeAudioSourceManager = new YTSourceManager(true);
-										youtubeAudioSourceManager.setPlaylistPageCount(100);
-										track.set((AudioTrack) youtubeAudioSourceManager.loadTrackWithVideoId(evnt.track.getInfo().uri, true));
-									} catch (FriendlyException ignored) {
+				
+				@Override
+				public void playlistLoaded(AudioPlaylist playlist) {
+					originalmessage.addReaction(Emoji.fromUnicode("✅")).queue();
+					AudioTrack item;
+					for (AudioTrack audioTrack : playlist.getTracks()) {
+						item = audioTrack;
+						if (queue.getOrDefault(e.getGuild(), new ArrayList<>()).isEmpty()) {
+							var playerManager = PlayerManager.getInstance();
+							AudioSources.registerSources(playerManager);
+							var player = playerManager.createPlayer();
+							player.addListener(evt -> {
+								if (evt instanceof TrackEndEvent evnt) {
+									Guild guild = e.getGuild();
+									var list = queue.get(guild);
+									if (!list.get(0).a().equals(evnt.track)) return;
+									if (evnt.endReason.equals(AudioTrackEndReason.LOAD_FAILED)) {
+										PlayerManager.getInstance().loadItemOrdered(e.getGuild(), evnt.track.getIdentifier(), new ErrorResultHandler(evnt, originalmessage));
+										return;
+									}
+									if (repeatSingle.contains(guild)) {
+										PlayerManager.getInstance().loadItemOrdered(e.getGuild(), evnt.track.getInfo().uri, new ErrorResultHandler(evnt, originalmessage));
+										return;
+									}
+									if (repeat.contains(guild)) {
+										AudioTrack track = list.get(0).a().makeClone();
+										track.setPosition(0L);
+										list.add(new Tuple<>(track, list.get(0).b()));
+									}
+									list.remove(0);
+									queue.remove(guild);
+									queue.put(guild, list);
+									if (!list.isEmpty()) {
+										evt.player.playTrack(list.get(0).a());
+									} else {
+										guild.getAudioManager().closeAudioConnection();
 									}
 								}
-								evnt.player.playTrack(track.get());
-								Thread.interrupted();
-							}).start();
-							return;
-						}
-						if (evt instanceof TrackEndEvent evnt) {
-							Guild guild = e.getGuild();
-							var list = queue.getOrDefault(guild, new ArrayList<>());
-							if (evnt.endReason.equals(AudioTrackEndReason.LOAD_FAILED)) {
-								AtomicReference<AudioTrack> track = new AtomicReference<>(null);
-								new Thread(() -> {
-									while (track.get() == null) {
-										try {
-											if (isSoundcloud) {
-												int l = 0;
-												if (message.getContentRaw().startsWith(commandPrefix + "sp ")) l = commandPrefix.length() + 3;
-												if (message.getContentRaw().startsWith(commandPrefix + "soundcloudplay ")) l = commandPrefix.length() + 15;
-												track.set(SoundCloudAudioSourceManager.createDefault().loadFromTrackPage(message.getContentRaw().substring(l)));
-											} else {
-												var youtubeAudioSourceManager = new YTSourceManager(true);
-												youtubeAudioSourceManager.setPlaylistPageCount(100);
-												track.set((AudioTrack) youtubeAudioSourceManager.loadTrackWithVideoId(evnt.track.getInfo().uri, true));
-											}
-										} catch (FriendlyException ignored) {
-										}
-									}
-									evnt.player.playTrack(track.get());
-									Thread.interrupted();
-								}).start();
-								return;
+							});
+							var list = new ArrayList<Tuple<AudioTrack, Message>>();
+							list.add(new Tuple<>(item, originalmessage));
+							queue.put(e.getGuild(), list);
+							if (volume.containsKey(e.getGuild())) {
+								player.setVolume(volume.get(e.getGuild()));
 							}
-							if (repeat.contains(guild)) {
-								AudioTrack track = list.get(0).a().makeClone();
-								track.setPosition(0L);
-								list.add(new Tuple<>(track, list.get(0).b()));
-							}
-							list.remove(0);
-							queue.remove(guild);
-							queue.put(guild, list);
-							if (!list.isEmpty()) {
-								evt.player.playTrack(list.get(0).a());
+							player.startTrack(item, false);
+							var handler = new AudioPlayerSendHandler(player);
+							var voiceChannel = e.getMember().getVoiceState().getChannel();
+							var audioManager = e.getGuild().getAudioManager();
+							audioManager.setSelfDeafened(true);
+							audioManager.setSendingHandler(handler);
+							audioManager.openAudioConnection(voiceChannel);
+						} else {
+							var list = queue.get(e.getGuild());
+							if (isFirst.get()) {
+								list.add(1, new Tuple<>(item, originalmessage));
 							} else {
-								guild.getAudioManager().closeAudioConnection();
+								list.add(new Tuple<>(item, originalmessage));
 							}
+							queue.remove(e.getGuild());
+							queue.put(e.getGuild(), list);
 						}
-					});
-					var list = new ArrayList<Tuple<AudioTrack, Message>>();
-					list.add(new Tuple<>(item, originalmessage));
-					queue.put(e.getGuild(), list);
-					if (volume.containsKey(e.getGuild())) {
-						player.setVolume(volume.get(e.getGuild()));
 					}
-					player.startTrack(item, false);
-					var handler = new AudioPlayerSendHandler(player);
-					var voiceChannel = e.getMember().getVoiceState().getChannel();
-					var audioManager = e.getGuild().getAudioManager();
-					audioManager.setSelfDeafened(true);
-					audioManager.setSendingHandler(handler);
-					audioManager.openAudioConnection(voiceChannel);
-				} else {
-					var list = queue.get(e.getGuild());
-					list.add(new Tuple<>(item, originalmessage));
-					queue.remove(e.getGuild());
-					queue.put(e.getGuild(), list);
 				}
-			}
+				
+				@Override
+				public void noMatches() {
+					var youtubeAudioSourceManager = new YTSourceManager(true);
+					youtubeAudioSourceManager.setPlaylistPageCount(100);
+					AudioItem audioItem;
+					int l = 0;
+					if (message.getContentRaw().startsWith(commandPrefix + "p ")) l = commandPrefix.length() + 2;
+					if (message.getContentRaw().startsWith(commandPrefix + "play ")) l = commandPrefix.length() + 5;
+					audioItem = youtubeAudioSourceManager.search(originalmessage.getContentRaw().substring(l));
+					AudioTrack item = ((AudioPlaylist) audioItem).getTracks().get(0);
+					originalmessage.addReaction(Emoji.fromUnicode("✅")).queue();
+					if (queue.getOrDefault(e.getGuild(), new ArrayList<>()).isEmpty()) {
+						var playerManager = PlayerManager.getInstance();
+						AudioSources.registerSources(playerManager);
+						var player = playerManager.createPlayer();
+						player.addListener((evt) -> {
+							if (evt instanceof TrackEndEvent evnt) {
+								Guild guild = e.getGuild();
+								var list = queue.getOrDefault(guild, new ArrayList<>());
+								if (!list.get(0).a().equals(evnt.track)) return;
+								if (evnt.endReason.equals(AudioTrackEndReason.LOAD_FAILED)) {
+									PlayerManager.getInstance().loadItemOrdered(e.getGuild(), evnt.track.getIdentifier(), new ErrorResultHandler(evnt, originalmessage));
+									return;
+								}
+								if (repeatSingle.contains(guild)) {
+									PlayerManager.getInstance().loadItemOrdered(e.getGuild(), evnt.track.getInfo().uri, new ErrorResultHandler(evnt, originalmessage));
+									return;
+								}
+								if (repeat.contains(guild)) {
+									AudioTrack track = list.get(0).a().makeClone();
+									track.setPosition(0L);
+									list.add(new Tuple<>(track, list.get(0).b()));
+								}
+								list.remove(0);
+								queue.remove(guild);
+								queue.put(guild, list);
+								if (!list.isEmpty()) {
+									evt.player.playTrack(list.get(0).a());
+								} else {
+									guild.getAudioManager().closeAudioConnection();
+								}
+							}
+						});
+						var list = new ArrayList<Tuple<AudioTrack, Message>>();
+						list.add(new Tuple<>(item, originalmessage));
+						queue.put(e.getGuild(), list);
+						if (volume.containsKey(e.getGuild())) {
+							player.setVolume(volume.get(e.getGuild()));
+						}
+						player.startTrack(item, false);
+						var handler = new AudioPlayerSendHandler(player);
+						var voiceChannel = e.getMember().getVoiceState().getChannel();
+						var audioManager = e.getGuild().getAudioManager();
+						audioManager.setSelfDeafened(true);
+						audioManager.setSendingHandler(handler);
+						audioManager.openAudioConnection(voiceChannel);
+					} else {
+						var list = queue.get(e.getGuild());
+						if (isFirst.get()) {
+							list.add(1, new Tuple<>(item, originalmessage));
+						} else {
+							list.add(new Tuple<>(item, originalmessage));
+						}
+						queue.remove(e.getGuild());
+						queue.put(e.getGuild(), list);
+					}
+				}
+				
+				@Override
+				public void loadFailed(FriendlyException exception) {
+					originalmessage.addReaction(Emoji.fromUnicode("⛔")).queue();
+					originalmessage.reply("로딩에 실패했어요...").mentionRepliedUser(false).queue();
+				}
+			});
 		} else {
 			originalmessage.addReaction(Emoji.fromUnicode("⛔")).queue();
 			originalmessage.reply("오디오 채널에 들어가야 해당 명령어를 사용할 수 있어요!").mentionRepliedUser(false).queue();
@@ -363,14 +363,14 @@ public class DiscordListener implements EventListener {
 			return;
 		}
 		if (message.getContentRaw().startsWith(commandPrefix + "p ") || message.getContentRaw().startsWith(commandPrefix + "play ")) {
-			playExecute(message, u, e, originalmessage, false);
+			playExecute(message, u, e, originalmessage);
 		}
 		if (message.getContentRaw().equals(commandPrefix + "p") || message.getContentRaw().equals(commandPrefix + "play")) {
-			playExecute(message, u, e, originalmessage, false);
+			playExecute(message, u, e, originalmessage);
 		}
 		if (message.getContentRaw().startsWith(commandPrefix + "pf ") || message.getContentRaw().startsWith(commandPrefix + "playfirst ")) {
 			if (originalmessage.getMember().hasPermission(Permission.ADMINISTRATOR)) {
-				playExecute(message, u, e, originalmessage, false);
+				playExecute(message, u, e, originalmessage);
 			} else {
 				originalmessage.addReaction(Emoji.fromUnicode("⛔")).queue();
 				originalmessage.reply("대기열을 무시하고 재생할 권한이 없어요!").mentionRepliedUser(false).queue();
